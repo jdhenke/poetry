@@ -49,14 +49,15 @@ SOFTWARE.
 
 '''
 
-# BUGS
-#   1) Could reach the "end", where has not experienced a following state
-#   2) doesn't evenly weight all files specified. should be option.
-#   3) perhaps not bug, but assumes random seed is fine. 
-#      maybe have option to provide seed?
-
 from abc import *
 import re, sys, random
+
+# Assumptions to consider changing
+# 1) Handling a terminal state; one from which no transitions were seen
+#       - currently, simply returns the "mashup" up to that point
+# 2) Random seeding; simply picks from any state seen, uniformly at random
+#       - could make it based on frequency
+#       - could make it specified by the user
 
 def main():
     '''parses command line. creates model. prints mashup.'''
@@ -104,9 +105,10 @@ class WordHandler(DataHandler):
 
 class MarkovModel(object):
     
-    def __init__(self, order, handler, paths):
+    def __init__(self, order, handler, paths, normalize=True):
         self.order = order
         self.handler = handler
+        self.normalize = normalize
         self.distro = self.get_distribution(paths)
 
     def get_distribution(self, paths):
@@ -126,7 +128,22 @@ class MarkovModel(object):
 
         counts = {}
         for path in paths:
-            path_counts = self.get_transitions(counts, path)
+            path_counts = self.get_transitions(path)
+            if self.normalize:
+                # normalize transitions form each state to sum to 1
+                # different size documents will contribute evenly
+                # on a per state basis
+                for state, transitions in path_counts.iteritems():
+                    total = 1.0 * sum(transitions.values())
+                    for datum in transitions:
+                        transitions[datum] /= total
+            # update global counts
+            for state, transitions in path_counts.iteritems():
+                counts.setdefault(state, {})
+                for datum, count in transitions.iteritems():
+                    counts[state].setdefault(datum, 0)
+                    counts[state][datum] += count
+        # create cumulative probability distribution
         distro = {}
         for state, next_letters in counts.iteritems():
             total = 1.0 * sum(next_letters.values())
@@ -137,8 +154,9 @@ class MarkovModel(object):
                 cdf += count / total
         return distro
 
-    def get_transitions(self, counts, path):
-        '''modifies counts to include data from path'''
+    def get_transitions(self, path):
+        '''returns mapping from state to possible transitions with counts'''
+        counts = {}
         data = self.handler.get_data(path)
         for i in xrange(len(data) - self.order):
             state = tuple(data[i:i+self.order])
@@ -146,12 +164,20 @@ class MarkovModel(object):
             datum = data[i+self.order]
             counts[state].setdefault(datum, 0)
             counts[state][datum] += 1
+        return counts
             
     def mashup(self, n):
-        '''returns string mashup of length n based on this model'''
+        '''
+        returns string mashup of length <= n based on this model
+        will have length n, unless a state is encountered from which
+        no transitions were seen in the data.
+        
+        '''
         state = random.choice(self.distro.keys())
         data = []
         for i in xrange(n):
+            if state not in self.distro:
+                continue
             datum = self.choose_next(self.distro[state])
             data.append(datum)
             state = state[1:] + (datum, )
