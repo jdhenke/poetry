@@ -21,7 +21,7 @@ Input:
 
     ./mashup.py *.txt                    # mashup all three
 
-    ./mashup.py mimic.py                 # inception
+    ./mashup.py mashup.py                # inception
 
 Output:
     prints to stdout a variety of mashups
