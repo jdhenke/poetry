@@ -1,7 +1,5 @@
 #!/usr/bin/python
-
 '''
-
 MARKOV MODEL MASHUPS
 
 Creates 'lyrical mashups' using Markov Models.
@@ -46,145 +44,100 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 SOFTWARE.
-
 '''
 
-from abc import *
 import re, sys, random
-
-# Assumptions to consider changing
-# 1) Handling a terminal state; one from which no transitions were seen
-#       - currently, simply returns the "mashup" up to that point
-# 2) Random seeding; simply picks from any state seen, uniformly at random
-#       - could make it based on frequency
-#       - could make it specified by the user
+from abc import *
+    
+length = 15
+order = 2
 
 def main():
-    '''parses command line. creates model. prints mashup.'''
     paths = sys.argv[1:]
-    assert len(paths) > 0, 'No paths specified.'
-    max_order = 3
-    # quick and dirty way to display results from different handlers
-    for handler, length in ((CharacterHandler(), 60), (WordHandler(), 10)):
-        print 'Using %s' % (handler, )
-        for order in xrange(1, max_order + 1):
-            mm = MarkovModel(order, handler, paths)
-            text = mm.mashup(length)
-            print '\t Order %i => %s' % (order, text, )
+    if len(paths) == 0:
+        print 'No input specified'
+        sys.exit(1)
+    Handler = WordHandler
+    sources = [Handler(path) for path in paths]
+    mc = MarkovChain(2, sources)
+    seq = mc.walk(length)
+    mashup = Handler.format(seq)
+    print mashup
 
-class DataHandler(object):
-    '''Base class for extracting different data from files'''
+class FileHandler(object):
     __metaclass__ = ABCMeta
-    @abstractmethod
-    def get_data(path):
-        pass
-    @abstractmethod
-    def data_to_str(path, data):
-        pass
-    @abstractmethod
-    def __str__(self):
-        pass
-
-class CharacterHandler(DataHandler):
-    '''use characters except new lines'''
-    def get_data(self, path):
-        return tuple([x for x in open(path).read() if x not in ('\n', '\r', )])
-    def data_to_str(self, data):
-        return ''.join(data)
-    def __str__(self):
-        return 'Letters'
-
-class WordHandler(DataHandler): 
-    '''use your words! (delimited by whitespace)'''
-    def get_data(self, path):
-        return tuple([x for x in re.split('\s+', open(path).read()) if len(x) > 0])
-    def data_to_str(self, data):
-        return ' '.join(data)
-    def __str__(self):
-        return 'Words'
-
-class MarkovModel(object):
-    
-    def __init__(self, order, handler, paths, normalize=True):
-        self.order = order
-        self.handler = handler
-        self.normalize = normalize
-        self.distro = self.get_distribution(paths)
-
-    def get_distribution(self, paths):
-        '''
-        returns dictionary:
-            keys = state
-            values = list of (datum, cdf)
-                example:
-                    counts[state] = {'A':3, 'C':6, 'B':3}
-                    distro[state] = [('A', 0), ('C', .25), ('B', .75)] 
-
-        - guarantees cdfs will be in increasing order
-        - no guarantees on order of data elements
-        - cdfs will NOT sum to 1; in fact will never
-            - this convention is useful in choose_next()
-        '''
-
+    def __init__(self, path):
+        self.path = path
+    def get_counts(self, order):
         counts = {}
-        for path in paths:
-            path_counts = self.get_transitions(path)
-            if self.normalize:
-                # normalize transitions form each state to sum to 1
-                # different size documents will contribute evenly
-                # on a per state basis
-                for state, transitions in path_counts.iteritems():
-                    total = 1.0 * sum(transitions.values())
-                    for datum in transitions:
-                        transitions[datum] /= total
-            # update global counts
-            for state, transitions in path_counts.iteritems():
-                counts.setdefault(state, {})
-                for datum, count in transitions.iteritems():
-                    counts[state].setdefault(datum, 0)
-                    counts[state][datum] += count
+        data = self.get_states()
+        for i in xrange(len(data) - order):
+            previous_state = tuple(data[i:i+order])
+            counts.setdefault(previous_state, {})
+            next_state = data[i+order]
+            counts[previous_state].setdefault(next_state, 0)
+            counts[previous_state][next_state] += 1
+        return counts
+    @abstractmethod
+    def get_states(self):
+        '''returns sequences of states found in data'''
+    @staticmethod
+    @abstractmethod
+    def format(states):
+        '''returns in the raw format associated with the sequence of states'''
+
+class CharHandler(FileHandler):
+    def get_states(self):
+        return tuple([x for x in open(self.path).read() if x not in ('\n', '\r')])
+    @staticmethod
+    def format(states):
+        return ''.join(states) 
+
+class WordHandler(FileHandler):
+    def get_states(self):
+        words = re.split(r'\s+', open(self.path).read())
+        return tuple([x for x in words if len(x) > 0])
+    @staticmethod
+    def format(states):
+        return ' '.join(states)
+
+class MarkovChain(object):
+    def __init__(self, order, handlers):
+        self.order = order
+        self.distro = self._get_distro(handlers)
+    def _get_distro(self, handlers):
+        # get normalized global counts?
+        global_counts = {}
+        for handler in handlers:
+            source_counts = handler.get_counts(self.order)
+            for previous_states, next_states in source_counts.iteritems():
+                total = 1.0 * sum(next_states.values())
+                for next_state, count in next_states.iteritems():
+                    global_counts.setdefault(previous_states, {})
+                    global_counts[previous_states].setdefault(next_state, 0)
+                    global_counts[previous_states][next_state] += count / total
         # create cumulative probability distribution
         distro = {}
-        for state, next_letters in counts.iteritems():
-            total = 1.0 * sum(next_letters.values())
-            distro[state] = []
+        for previous_states, next_states in global_counts.iteritems():
+            total = 1.0 * sum(next_states.values())
+            distro[previous_states] = []
             cdf = 0.0
-            for letter, count in next_letters.iteritems():
-                distro[state].append((letter, cdf))
+            for next_state, count in next_states.iteritems():
+                distro[previous_states].append((next_state, cdf))
                 cdf += count / total
         return distro
-
-    def get_transitions(self, path):
-        '''returns mapping from state to possible transitions with counts'''
-        counts = {}
-        data = self.handler.get_data(path)
-        for i in xrange(len(data) - self.order):
-            state = tuple(data[i:i+self.order])
-            counts.setdefault(state, {})
-            datum = data[i+self.order]
-            counts[state].setdefault(datum, 0)
-            counts[state][datum] += 1
-        return counts
+    def walk(self, length):
+        previous_states = random.choice(list(self.distro.keys()))
+        output = list(previous_states)
+        while len(output) < length:
+            options = self.distro[previous_states]
+            next_state = self.choose_next(options)
+            output.append(next_state)
+            previous_states = previous_states[1:] + (next_state, )
+        return output
             
-    def mashup(self, n):
-        '''
-        returns string mashup of length <= n based on this model
-        will have length n, unless a state is encountered from which
-        no transitions were seen in the data.
-        
-        '''
-        state = random.choice(self.distro.keys())
-        data = []
-        for i in xrange(n):
-            if state not in self.distro:
-                continue
-            datum = self.choose_next(self.distro[state])
-            data.append(datum)
-            state = state[1:] + (datum, )
-        return self.handler.data_to_str(data)
-
     def choose_next(self, options):
-        '''chooses random datum based on probabilities'''
+        '''chooses random next state based on probabilities'''
         r = random.random()
         last = None
         for datum, prob in options:
@@ -196,4 +149,3 @@ class MarkovModel(object):
 
 if __name__ == '__main__':
     main()
-
