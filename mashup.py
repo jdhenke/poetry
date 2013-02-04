@@ -22,8 +22,8 @@ Input:
     ./mashup.py mashup.py                # inception
 
 Output:
-    prints to stdout a variety of mashups
-    modify main() to fit your needs!
+    mashup of source documents
+    adjust constants and main to fit your needs!
 
 Copyright (c) 2013 Joseph Henke
 
@@ -48,16 +48,18 @@ SOFTWARE.
 
 import re, sys, random
 from abc import *
-    
-length = 15
+
+
+# ADJUST THESE!!!
 order = 2
+length = 15
+Handler = WordHandler
 
 def main():
     paths = sys.argv[1:]
     if len(paths) == 0:
         print 'No input specified'
         sys.exit(1)
-    Handler = WordHandler
     sources = [Handler(path) for path in paths]
     mc = MarkovChain(2, sources)
     seq = mc.walk(length)
@@ -80,11 +82,11 @@ class FileHandler(object):
         return counts
     @abstractmethod
     def get_states(self):
-        '''returns sequences of states found in data'''
+        '''returns list of states found in data'''
     @staticmethod
     @abstractmethod
     def format(states):
-        '''returns in the raw format associated with the sequence of states'''
+        '''returns raw format associated with states'''
 
 class CharHandler(FileHandler):
     def get_states(self):
@@ -106,7 +108,17 @@ class MarkovChain(object):
         self.order = order
         self.distro = self._get_distro(handlers)
     def _get_distro(self, handlers):
-        # get normalized global counts?
+        '''
+        returns dictionary
+        keys = tuples of previous states
+        values = list of tuples (next_state, cdf)
+            cdf at index i => cdf of going to any of states in [0,i) = cdf
+            {B:1, C:1, A:2} => [(B, 0), (C, 0.25), (A, 0.5)]
+        no gurantees on ordering of states
+        guarantees cdfs are increasing
+        '''
+
+        # get normalized global counts
         global_counts = {}
         for handler in handlers:
             source_counts = handler.get_counts(self.order)
@@ -126,7 +138,14 @@ class MarkovChain(object):
                 distro[previous_states].append((next_state, cdf))
                 cdf += count / total
         return distro
+
     def walk(self, length):
+        '''
+        returns list of states, using this model's transition probabilities
+        when choosing next state based on previous states.
+        starts with random states.
+
+        '''
         previous_states = random.choice(list(self.distro.keys()))
         output = list(previous_states)
         while len(output) < length:
@@ -135,9 +154,9 @@ class MarkovChain(object):
             output.append(next_state)
             previous_states = previous_states[1:] + (next_state, )
         return output
-            
+
     def choose_next(self, options):
-        '''chooses random next state based on probabilities'''
+        '''randomly chooses next state based on probabilities'''
         r = random.random()
         last = None
         for datum, prob in options:
