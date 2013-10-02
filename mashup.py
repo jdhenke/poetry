@@ -48,23 +48,27 @@ SOFTWARE.
 
 import re, sys, random
 from abc import *
-
-
-# ADJUST THESE!!!
-order = 2
-length = 15
-Handler = WordHandler
+from pprint import pprint
+import simplejson
 
 def main():
+    # ADJUST THESE!!!
+    order = 1
+    length = 10
+    Handler = WordHandler
     paths = sys.argv[1:]
     if len(paths) == 0:
         print 'No input specified'
         sys.exit(1)
     sources = [Handler(path) for path in paths]
-    mc = MarkovChain(2, sources)
-    seq = mc.walk(length)
-    mashup = Handler.format(seq)
-    print mashup
+    mc = MarkovChain(order, sources)
+    with open("data.json", "w") as f:
+        f.write(simplejson.dumps(mc.distro))
+    # seq = mc.walk(length)
+    # for i in xrange(len(seq) - order):
+    #     print seq[i], mc.distro[tuple(seq[i:i+order])]
+    # mashup = Handler.format(seq)
+    # print mashup
 
 class FileHandler(object):
     __metaclass__ = ABCMeta
@@ -128,15 +132,18 @@ class MarkovChain(object):
                     global_counts.setdefault(previous_states, {})
                     global_counts[previous_states].setdefault(next_state, 0)
                     global_counts[previous_states][next_state] += count / total
+
         # create cumulative probability distribution
         distro = {}
         for previous_states, next_states in global_counts.iteritems():
             total = 1.0 * sum(next_states.values())
-            distro[previous_states] = []
+            assert len(previous_states) == 1
+            distro[previous_states[0]] = []
             cdf = 0.0
             for next_state, count in next_states.iteritems():
-                distro[previous_states].append((next_state, cdf))
+                distro[previous_states[0]].append((next_state, cdf))
                 cdf += count / total
+
         return distro
 
     def walk(self, length):

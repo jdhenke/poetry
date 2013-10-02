@@ -1,0 +1,165 @@
+<html>
+<head>
+<script src="/scripts/jquery.js" type="text/javascript"></script>
+<script src="scripts/underscore.js"></script>
+<script src="scripts/d3.js"></script>
+<script>
+  $(function() {
+
+    var initialWindowWidth = $(window).width() * .9;
+    var initialWindowHeight = $(window).height() * .9;
+
+    var svg = d3.select("#workspace").append("svg:svg")
+      .attr("width", initialWindowWidth)
+      .attr("height", initialWindowHeight)
+      .style("border", "1px solid #F00");
+
+    // zoom behavior which is used to scale and translate
+    var zoom = d3.behavior.zoom();
+
+    var zoomCapture = svg.append('g')
+        .classed('zoom-capture', true);
+
+    var rect = zoomCapture.append('svg:rect')
+      .attr("width", "100%")
+      .attr("height", "100%")
+      .style("fill-opacity", "0%");
+
+    var workspace = zoomCapture.append('svg:g');
+
+    var linkContainer = workspace.append('svg:g');
+    var nodeContainer = workspace.append('svg:g');
+
+    // add event listener to actually affect UI
+    zoomCapture.call(zoom.on("zoom", function() {
+
+      if (translateLock) return;
+
+      if ($(d3.event.target).hasClass("node")) return;
+
+      // otherwise, translate and scale according to zoom
+      workspace.attr("transform",
+          "translate(" + d3.event.translate + ")" + 
+          " scale(" + d3.event.scale + ")");
+    }))
+    .on("dblclick.zoom", null); // ignore double click to zoom
+
+    var nodes = [];
+    var links = [];
+
+    var force = d3.layout.force()
+      .size([initialWindowWidth, initialWindowHeight])
+      .charge(-500);
+    // lock infrastracture to ignore zoom changes that would
+    // typically occur when dragging a node
+    var translateLock = false;
+    var currentZoom;
+    force.drag()
+      .on('dragstart', function() {
+        translateLock = true;
+        currentZoom = zoom.translate();
+      })
+      .on('dragend', function() {
+        zoom.translate(currentZoom);
+        translateLock = false;
+      });
+    
+    function render() {
+      
+      // select nodes, adding some if necessary
+      var nodeSelection = nodeContainer.selectAll(".node")
+        .data(nodes, function(n) { return n.text; })
+      nodeSelection.enter()
+        .append("svg:text")
+          .text(function(node) { return node.text; })
+          .classed("node", true)
+          .on("click", function(d) {
+            if (!d.root) {
+              d.fixed = !d.fixed;
+            }
+            if (d3.event.defaultPrevented) return;
+            d.fixed = true;
+            d3.select(this).classed("highlight", true);
+            var cdf = 0;
+            _.chain(data[d.text])
+              .sample(10)
+              .each(function(info) {
+                var newText = info[0];
+                var newNode = {text: newText};
+                nodes.push(newNode);
+                var link = {source: d, target: newNode, strength: 0.10}
+                links.push(link);
+              });
+            render();
+          })
+          .on("mouseover", function() {
+            linkSelection.classed("highlight", true);
+          })
+          .on("mouseout", function() {
+            linkSelection.classed("highlight", false);
+          })
+          .call(force.drag);
+
+      // select links, adding some if necessary
+      var linkSelection = linkContainer.selectAll(".link")
+        .data(links, function(link) { return link.source.text + link.target.text; })
+
+      // add event listener to actually affect UI
+      zoomCapture.call(zoom.on("zoom", function() {
+
+        // ignore zoom event if it's due to a node being dragged
+        if (translateLock) return;
+
+        // otherwise, translate and scale according to zoom
+        workspace.attr("transform",
+            "translate(" + d3.event.translate + ")" + 
+            " scale(" + d3.event.scale + ")");
+      }))
+      .on("dblclick.zoom", null); // ignore double click to zoom
+
+      linkSelection.enter()
+        .append("line")
+          .attr("stroke-width", 1)
+          .classed("link", true);
+      force
+        .nodes(nodes)
+        .links(links)
+        .linkStrength(function(link) { 
+          return link.strength;
+        })
+        .start()
+        .on("tick", function() {
+          nodeSelection
+            .attr("x", function(node) { return node.x; })
+            .attr("y", function(node) { return node.y; });
+          linkSelection
+            .attr("x1", function(d) { return d.source.x; })
+            .attr("y1", function(d) { return d.source.y; })
+            .attr("x2", function(d) { return d.target.x; })
+            .attr("y2", function(d) { return d.target.y; })
+        });
+
+    }
+    render();
+    var data;
+    $.getJSON("/data/data.json", function(response) {
+      data = response;
+      nodes.push({text: "the", root: true, x: initialWindowHeight / 2, y: initialWindowHeight / 2, fixed:true});
+      render();
+    });
+  });
+</script>
+<style>
+  body {font-family: "Trebuchet MS";}
+  #title {margin-left: auto; margin-right:auto; text-align: center; width: 75%;font-size: 18pt;}
+  .node {cursor: pointer;}
+  .link {stroke: black; opacity: 0.2;}
+  .link.highlight { stroke: red; }
+  .node.highlight {fill: red;}
+</style>
+</head>
+<body>
+  <div id="title">If only d3 was 3d...</div>
+  <div id="workspace"></div>
+</body>
+</html>
