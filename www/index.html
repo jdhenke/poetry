@@ -39,7 +39,7 @@
 
       // otherwise, translate and scale according to zoom
       workspace.attr("transform",
-          "translate(" + d3.event.translate + ")" + 
+          "translate(" + d3.event.translate + ")" +
           " scale(" + d3.event.scale + ")");
     }))
     .on("dblclick.zoom", null); // ignore double click to zoom
@@ -49,7 +49,11 @@
 
     var force = d3.layout.force()
       .size([initialWindowWidth, initialWindowHeight])
-      .charge(-500);
+      .charge(-500)
+      .linkStrength(1)
+      .gravity(0.7)
+      .friction(0.9)
+      .alpha(0.9);
     // lock infrastracture to ignore zoom changes that would
     // typically occur when dragging a node
     var translateLock = false;
@@ -63,9 +67,9 @@
         zoom.translate(currentZoom);
         translateLock = false;
       });
-    
+
     function render() {
-      
+
       // select nodes, adding some if necessary
       var nodeSelection = nodeContainer.selectAll(".node")
         .data(nodes, function(n) { return n.text; })
@@ -73,32 +77,8 @@
         .append("svg:text")
           .text(function(node) { return node.text; })
           .classed("node", true)
-          .on("click", function(d) {
-            if (!d.root) {
-              d.fixed = !d.fixed;
-            }
-            if (d3.event.defaultPrevented) return;
-            d.fixed = true;
-            d3.select(this).classed("highlight", true);
-            var cdf = 0;
-            _.chain(data[d.text])
-              .sample(10)
-              .each(function(info) {
-                var newText = info[0];
-                var newNode = {text: newText};
-                nodes.push(newNode);
-                var link = {source: d, target: newNode, strength: 0.10}
-                links.push(link);
-              });
-            render();
-          })
-          .on("mouseover", function() {
-            linkSelection.classed("highlight", true);
-          })
-          .on("mouseout", function() {
-            linkSelection.classed("highlight", false);
-          })
-          .call(force.drag);
+          .attr("text-anchor", "middle")
+          .on("click", play);
 
       // select links, adding some if necessary
       var linkSelection = linkContainer.selectAll(".link")
@@ -112,7 +92,7 @@
 
         // otherwise, translate and scale according to zoom
         workspace.attr("transform",
-            "translate(" + d3.event.translate + ")" + 
+            "translate(" + d3.event.translate + ")" +
             " scale(" + d3.event.scale + ")");
       }))
       .on("dblclick.zoom", null); // ignore double click to zoom
@@ -124,7 +104,7 @@
       force
         .nodes(nodes)
         .links(links)
-        .linkStrength(function(link) { 
+        .linkStrength(function(link) {
           return link.strength;
         })
         .start()
@@ -138,21 +118,36 @@
             .attr("x2", function(d) { return d.target.x; })
             .attr("y2", function(d) { return d.target.y; })
         });
-
     }
+
     render();
     var data;
     $.getJSON("/data/data.json", function(response) {
       data = response;
-      nodes.push({text: "the", root: true, x: initialWindowHeight / 2, y: initialWindowHeight / 2, fixed:true});
+      nodes.push({text: "the", root: true, x: initialWindowHeight / 2, y: initialWindowHeight / 2});
       render();
     });
+
+    function play(d) {
+      var nodeSelection = nodeContainer.selectAll(".node")
+        .data(nodes, function(n) { return n.text; })
+      d.fixed = true;
+      var newText = _.sample(data[d.text])[0];
+      var newNode = {text: newText, parent: d};
+      nodes.push(newNode);
+      var link = {source: d, target: newNode, strength: 0.90};
+      links.push(link);
+      setTimeout(function() {
+        play(newNode);
+      }, 600);
+      render();
+    }
   });
 </script>
 <style>
   body {font-family: "Trebuchet MS";}
   #title {margin-left: auto; margin-right:auto; text-align: center; width: 75%;font-size: 18pt;}
-  .node {cursor: pointer;}
+  .node {cursor: pointer; font-size: 10pt;}
   .link {stroke: black; opacity: 0.2;}
   .link.highlight { stroke: red; }
   .node.highlight {fill: red;}
@@ -161,5 +156,6 @@
 <body>
   <div id="title">If only d3 was 3d...</div>
   <div id="workspace"></div>
+  <div id="poetry"></div>
 </body>
 </html>
